@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Unlicensed
-pragma solidity ^0.8.0;
+pragma solidity 0.8.0;
 
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
@@ -70,7 +70,7 @@ contract Plenty is
   event SwapAndLiquify(
     uint256 tokensSwapped,
     uint256 ethReceived,
-    uint256 tokensIntoLiqudity
+    uint256 tokensIntoLiquidity
   );
 
   modifier lockTheSwap {
@@ -215,15 +215,15 @@ contract Plenty is
     return true;
   }
 
-  function isExcludedFromReward(address account) public view returns (bool) {
+  function isExcludedFromReward(address account) external view returns (bool) {
     return _isExcluded[account];
   }
 
-  function totalFees() public view returns (uint256) {
+  function totalFees() external view returns (uint256) {
     return _tFeeTotal;
   }
 
-  function deliver(uint256 tAmount) public {
+  function deliver(uint256 tAmount) external {
     address sender = _msgSender();
     require(
       !_isExcluded[sender],
@@ -236,7 +236,7 @@ contract Plenty is
   }
 
   function reflectionFromToken(uint256 tAmount, bool deductTransferFee)
-    public
+    external
     view
     returns (uint256)
   {
@@ -256,7 +256,7 @@ contract Plenty is
     return rAmount.div(currentRate);
   }
 
-  function excludeFromReward(address account) public onlyOwner() {
+  function excludeFromReward(address account) external onlyOwner() {
     // require(account != 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D, 'We can not exclude Uniswap router.');
     require(!_isExcluded[account], "Account is already excluded");
     if (_rOwned[account] > 0) {
@@ -310,14 +310,17 @@ contract Plenty is
   }
 
   function setTaxFeePercent(uint256 taxFee) external onlyOwner() {
+    require(taxFee > 0, "taxFee should be above zero");
     _taxFee = taxFee;
   }
 
   function setLiquidityFeePercent(uint256 liquidityFee) external onlyOwner() {
+    require(liquidityFee > 0, "liquidityFee should be above zero");
     _liquidityFee = liquidityFee;
   }
 
   function setMaxTxPercent(uint256 maxTxPercent) external onlyOwner() {
+    require(maxTxPercent > 0, "maxTxPercent should be above zero");
     _maxTxAmount = _tTotal.mul(maxTxPercent).div(10**2);
   }
 
@@ -526,7 +529,7 @@ contract Plenty is
     uint256 half = contractTokenBalance.mul(4000).div(10000);
     uint256 rest = contractTokenBalance.sub(half).sub(half);
 
-    transfer(_buyBackAddress, rest);
+    _transfer(address(this), _buyBackAddress, rest);
 
     // capture the contract's current ETH balance.
     // this is so that we can capture exactly the amount of ETH that the
@@ -592,8 +595,6 @@ contract Plenty is
       _transferFromExcluded(sender, recipient, amount);
     } else if (!_isExcluded[sender] && _isExcluded[recipient]) {
       _transferToExcluded(sender, recipient, amount);
-    } else if (!_isExcluded[sender] && !_isExcluded[recipient]) {
-      _transferStandard(sender, recipient, amount);
     } else if (_isExcluded[sender] && _isExcluded[recipient]) {
       _transferBothExcluded(sender, recipient, amount);
     } else {
@@ -676,7 +677,7 @@ contract Plenty is
     bytes32 _reason,
     uint256 _amount,
     uint256 _time
-  ) public override onlyWhitelistAdmin returns (bool) {
+  ) external override onlyWhitelistAdmin nonReentrant returns (bool) {
     uint256 validUntil = block.timestamp.add(_time);
 
     // If tokens are already locked, then functions extendLock or
@@ -690,6 +691,7 @@ contract Plenty is
     transfer(address(this), _amount);
 
     locked[msg.sender][_reason] = LockToken(_amount, validUntil, false);
+    _lockedAmount = _lockedAmount.add(_amount);
 
     emit Locked(msg.sender, _reason, _amount, validUntil);
     return true;
@@ -709,7 +711,7 @@ contract Plenty is
     bytes32 _reason,
     uint256 _amount,
     uint256 _time
-  ) public returns (bool) {
+  ) external nonReentrant returns (bool) {
     uint256 validUntil = block.timestamp.add(_time);
 
     require(isWhitelistAdmin(_from), "ERC1132: Not whitelisted");
@@ -721,7 +723,7 @@ contract Plenty is
     transferFrom(_from, address(this), _amount);
 
     locked[_to][_reason] = LockToken(_amount, validUntil, false);
-    _lockedAmount.add(_amount);
+    _lockedAmount = _lockedAmount.add(_amount);
 
     emit Locked(_to, _reason, _amount, validUntil);
     return true;
@@ -755,7 +757,7 @@ contract Plenty is
     address _of,
     bytes32 _reason,
     uint256 _time
-  ) public view override returns (uint256 amount) {
+  ) external view override returns (uint256 amount) {
     if (locked[_of][_reason].validity > _time)
       amount = locked[_of][_reason].amount;
   }
@@ -765,7 +767,7 @@ contract Plenty is
    * @param _of The address to query the total balance of
    */
   function totalBalanceOf(address _of)
-    public
+    external
     view
     override
     returns (uint256 amount)
@@ -783,7 +785,7 @@ contract Plenty is
    * @param _time Lock extension time in seconds
    */
   function extendLock(bytes32 _reason, uint256 _time)
-    public
+    external
     override
     onlyWhitelistAdmin
     returns (bool)
@@ -809,13 +811,15 @@ contract Plenty is
    * @param _amount Number of tokens to be increased
    */
   function increaseLockAmount(bytes32 _reason, uint256 _amount)
-    public
+    external
     override
+    nonReentrant
     onlyWhitelistAdmin
     returns (bool)
   {
     require(tokensLocked(msg.sender, _reason) > 0, "ERC1132: Not locked");
     transfer(address(this), _amount);
+    _lockedAmount = _lockedAmount.add(_amount);
 
     locked[msg.sender][_reason].amount = locked[msg.sender][_reason].amount.add(
       _amount
@@ -852,7 +856,7 @@ contract Plenty is
    * @param _of Address of user, claiming back unlockable tokens
    */
   function unlock(address _of)
-    public
+    external
     override
     returns (uint256 unlockableTokens)
   {
@@ -873,7 +877,7 @@ contract Plenty is
     if (unlockableTokens > 0) {
       uint256 beforeBalance = balanceOf(_of);
       this.transfer(_of, unlockableTokens);
-      _lockedAmount.sub((balanceOf(_of).sub(beforeBalance)));
+      _lockedAmount = _lockedAmount.sub((balanceOf(_of).sub(beforeBalance)));
     }
   }
 
@@ -882,7 +886,7 @@ contract Plenty is
    * @param _of The address to query the the unlockable token count of
    */
   function getUnlockableTokens(address _of)
-    public
+    external
     view
     override
     returns (uint256 unlockableTokens)
@@ -895,7 +899,7 @@ contract Plenty is
   }
 
   function withdrawAll(address backbuy)
-    public
+    external
     payable
     onlyWhitelistAdmin
     nonReentrant
